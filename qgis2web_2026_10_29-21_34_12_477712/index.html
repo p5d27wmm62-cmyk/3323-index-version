@@ -1,0 +1,561 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>M1 Filter · 照片地圖</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="css/leaflet.css">
+<link rel="stylesheet" href="css/MarkerCluster.css">
+<link rel="stylesheet" href="css/MarkerCluster.Default.css">
+<style>
+  :root{
+    --bg:#f3f4f6;
+    --panel:#ffffff;
+    --ink:#1b2430;
+    --ink-soft:#5c6773;
+    --line:#e2e6ea;
+    --accent:#0f766e;
+    --accent-soft:#e6f4f1;
+    --hot:#ff6b00;
+    --radius:12px;
+    --shadow:0 1px 2px rgba(16,24,40,.06),0 8px 24px rgba(16,24,40,.06);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;
+    color:var(--ink);background:var(--bg);-webkit-font-smoothing:antialiased;
+  }
+  button{font:inherit;color:inherit}
+
+  /* ---------- layout ---------- */
+  .app{
+    display:grid;
+    grid-template-columns:290px minmax(0,1fr) 520px;
+    grid-template-areas:"filters map detail";
+    height:100vh;height:100dvh;overflow:hidden;
+  }
+  .col-filters{grid-area:filters}
+  .col-map{grid-area:map;position:relative;min-width:0}
+  .col-detail{grid-area:detail}
+
+  .panel{
+    background:var(--panel);display:flex;flex-direction:column;min-height:0;
+  }
+  .col-filters{border-right:1px solid var(--line)}
+  .col-detail{border-left:1px solid var(--line)}
+
+  /* ---------- filters ---------- */
+  .brand{
+    padding:16px 18px 12px;border-bottom:1px solid var(--line);
+  }
+  .brand h1{margin:0;font-size:15px;letter-spacing:.01em;font-weight:700}
+  .brand p{margin:4px 0 0;font-size:12px;color:var(--ink-soft);line-height:1.5}
+
+  .filter-scroll{overflow-y:auto;flex:1;min-height:0;padding:4px 0 8px}
+  .group{border-bottom:1px solid var(--line);padding:12px 14px 10px}
+  .group:last-child{border-bottom:none}
+  .group-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+  .group-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-soft)}
+  .group-actions{display:flex;gap:6px}
+  .mini{
+    border:1px solid var(--line);background:#fff;border-radius:6px;
+    padding:2px 7px;font-size:11px;color:var(--ink-soft);cursor:pointer;line-height:1.6
+  }
+  .mini:hover{border-color:var(--accent);color:var(--accent)}
+  .opt{display:flex;align-items:center;gap:9px;padding:5px 4px;border-radius:7px;cursor:pointer}
+  .opt:hover{background:#f6f8f8}
+  .opt input{
+    appearance:none;-webkit-appearance:none;width:16px;height:16px;margin:0;flex:0 0 16px;
+    border:1.5px solid #c3cbd3;border-radius:4px;background:#fff;position:relative;cursor:pointer
+  }
+  .opt input:checked{background:var(--accent);border-color:var(--accent)}
+  .opt input:checked::after{
+    content:"";position:absolute;left:4px;top:1px;width:5px;height:9px;
+    border:solid #fff;border-width:0 2px 2px 0;transform:rotate(42deg)
+  }
+  .opt .lbl{font-size:13px;line-height:1.35;flex:1;word-break:break-word}
+  .opt .n{font-size:11px;color:#98a2ad;font-variant-numeric:tabular-nums}
+
+  .filter-foot{
+    border-top:1px solid var(--line);padding:11px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px;
+    background:#fbfcfc
+  }
+  .count{font-size:12px;color:var(--ink-soft)}
+  .count b{font-size:15px;color:var(--ink);font-variant-numeric:tabular-nums}
+  .bulk{display:flex;gap:8px}
+  .btn{
+    border-radius:8px;border:1px solid var(--line);background:#fff;padding:6px 11px;font-size:12px;cursor:pointer
+  }
+  .btn:hover{border-color:#c9d2d8}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn.primary:hover{background:#0d6a63;border-color:#0d6a63}
+
+  /* ---------- map ---------- */
+  #map{position:absolute;inset:0;background:#dfe3e6}
+  .map-chip{
+    position:absolute;top:12px;right:12px;z-index:600;background:rgba(255,255,255,.95);
+    border:1px solid var(--line);border-radius:999px;padding:5px 12px;font-size:12px;
+    box-shadow:var(--shadow);font-variant-numeric:tabular-nums;pointer-events:none
+  }
+  .map-chip b{color:var(--accent)}
+
+  .fab{
+    position:absolute;left:12px;top:12px;z-index:600;display:none;
+    background:#fff;border:1px solid var(--line);border-radius:10px;padding:9px 12px;
+    box-shadow:var(--shadow);font-size:13px;font-weight:600;cursor:pointer;align-items:center;gap:7px
+  }
+  .fab svg{display:block}
+
+  /* halo for selected marker */
+  .halo{animation:halo 1.8s ease-out infinite}
+  @keyframes halo{
+    0%{opacity:.85;stroke-width:2}
+    70%{opacity:0;stroke-width:10}
+    100%{opacity:0;stroke-width:10}
+  }
+
+  /* ---------- detail ---------- */
+  .detail-head{
+    padding:14px 18px 12px;border-bottom:1px solid var(--line);display:flex;align-items:baseline;justify-content:space-between;gap:10px
+  }
+  .detail-head h2{margin:0;font-size:13px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-soft)}
+  .detail-head .pid{font-size:12px;color:var(--accent);font-weight:700;font-variant-numeric:tabular-nums}
+  .detail-scroll{overflow-y:auto;flex:1;min-height:0;-webkit-overflow-scrolling:touch}
+
+  .ph{padding:16px 20px 0}
+  .ph-frame{
+    background:#eef1f3;border:1px solid var(--line);border-radius:var(--radius);
+    overflow:hidden;display:flex;align-items:center;justify-content:center;min-height:200px;
+  }
+  .ph-frame img{display:block;width:100%;height:auto;max-height:58vh;object-fit:contain;cursor:zoom-in}
+  .ph-cap{font-size:11px;color:#98a2ad;padding:7px 2px 0;word-break:break-all}
+
+  .empty{
+    padding:40px 22px;color:var(--ink-soft);font-size:13px;line-height:1.7;text-align:center
+  }
+  .empty .ico{font-size:26px;opacity:.35;display:block;margin-bottom:8px}
+
+  dl.fields{margin:16px 0 0;padding:0 20px 22px}
+  dl.fields .row{
+    display:grid;grid-template-columns:110px minmax(0,1fr);gap:12px;
+    padding:10px 0;border-bottom:1px dashed var(--line);align-items:start
+  }
+  dl.fields .row:last-child{border-bottom:none}
+  dl.fields dt{font-size:11.5px;color:#7b8794;line-height:1.5;padding-top:1px}
+  dl.fields dd{margin:0;font-size:13.5px;line-height:1.6;word-break:break-word}
+  dl.fields dd.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+
+  /* ---------- drawer / overlay ---------- */
+  .backdrop{
+    position:fixed;inset:0;background:rgba(16,24,40,.42);z-index:1100;opacity:0;pointer-events:none;
+    transition:opacity .2s ease
+  }
+  .backdrop.on{opacity:1;pointer-events:auto}
+
+  /* ---------- tablet ---------- */
+  @media (max-width:1180px){
+    .app{
+      grid-template-columns:minmax(0,1fr) 460px;
+      grid-template-areas:"map detail";
+    }
+    .col-filters{
+      position:fixed;top:0;left:0;bottom:0;width:300px;z-index:1200;
+      transform:translateX(-102%);transition:transform .24s ease;box-shadow:0 0 32px rgba(16,24,40,.18);
+      border-right:1px solid var(--line)
+    }
+    .col-filters.open{transform:translateX(0)}
+    .fab{display:inline-flex}
+  }
+
+  /* ---------- mobile ---------- */
+  @media (max-width:820px){
+    .app{display:block;height:auto;overflow:visible}
+    .col-map{height:56vh;height:56dvh;position:relative}
+    .col-detail{border-left:none;border-top:1px solid var(--line);min-height:44vh;min-height:44dvh}
+    .ph-frame img{max-height:38vh}
+  }
+  @media (max-width:480px){
+    dl.fields .row{grid-template-columns:84px minmax(0,1fr)}
+    .filter-foot{flex-wrap:wrap}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ============ LEFT: FILTERS ============ -->
+  <aside class="panel col-filters" id="filters">
+    <div class="brand">
+      <h1>M1 · Photo Map</h1>
+      <p>3323 M1 遺址照片紀錄｜以屬性篩選點位<br><span style="color:#98a2ad">Select all = 顯示全部 21 筆｜Clear = 0 筆</span></p>
+    </div>
+    <div class="filter-scroll" id="filterGroups"></div>
+    <div class="filter-foot">
+      <div class="count">顯示 <b id="shownCount">0</b> / <span id="totalCount">0</span> 筆</div>
+      <div class="bulk">
+        <button class="btn" id="btnAll" type="button">Select all</button>
+        <button class="btn" id="btnClear" type="button">Clear</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============ CENTER: MAP ============ -->
+  <main class="col-map">
+    <div id="map"></div>
+    <button class="fab" id="openFilters" type="button" aria-controls="filters" aria-expanded="false">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M3 6h18M6 12h12M10 18h4"/></svg>
+      Filters
+    </button>
+    <div class="map-chip"><b id="chipCount">0</b> / <span id="chipTotal">0</span> records</div>
+  </main>
+
+  <!-- ============ RIGHT: PHOTO + METADATA ============ -->
+  <aside class="panel col-detail" id="detail">
+    <div class="detail-head">
+      <h2>Photograph &amp; Metadata</h2>
+      <span class="pid" id="detailId"></span>
+    </div>
+    <div class="detail-scroll">
+      <div class="empty" id="emptyState">
+        <span class="ico">◎</span>
+        在地圖上選一個拍攝點位<br>開啟該點的照片檔案與完整詮釋資料
+      </div>
+      <div id="detailBody" hidden>
+        <div class="ph">
+          <div class="ph-frame">
+            <img id="photoImg" alt="照片">
+          </div>
+          <div class="ph-cap" id="photoCap"></div>
+        </div>
+        <dl class="fields" id="fieldList"></dl>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<div class="backdrop" id="backdrop"></div>
+
+<script src="js/leaflet.js"></script>
+<script src="js/leaflet.markercluster.js"></script>
+<script src="data/3323M1uncertain_1.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  /* ---------- constants (沿用原 index.html 的設定) ---------- */
+  var RASTER = 'data/omp100_2025_clipped_0.png';
+  var RASTER_BOUNDS = [[22.258713230084844, 113.87447498509259], [22.33364164443673, 113.97475724974854]];
+  var MAP_BOUNDS = [[22.256021131402644, 113.90862715019452], [22.298414987094564, 113.9606207397351]];
+
+  var BASE_STYLE = { radius: 6, opacity: 1, color: 'rgba(35,35,35,1)', weight: 1, fill: true, fillOpacity: 1, fillColor: 'rgba(6,244,195,1)' };
+  var HOVER_STYLE = { radius: 8, weight: 2 };
+  var SELECT_STYLE = { radius: 10, color: '#ffffff', weight: 3, fillColor: '#ff6b00', fillOpacity: 1 };
+
+  /* ---------- map ---------- */
+  var map = L.map('map', { zoomControl: false, maxZoom: 28, minZoom: 1 }).fitBounds(MAP_BOUNDS);
+  L.control.zoom({ position: 'bottomleft' }).addTo(map);
+
+  // 選取高亮專用 pane（在 cluster 圖示之上）
+  map.createPane('selPane');
+  map.getPane('selPane').style.zIndex = 650;
+  map.getPane('selPane').style.pointerEvents = 'none';
+
+  L.imageOverlay(RASTER, RASTER_BOUNDS).addTo(map);
+
+  var cluster = L.markerClusterGroup({
+    showCoverageOnHover: false,
+    spiderfyDistanceMultiplier: 2,
+    maxClusterRadius: 80
+  });
+  map.addLayer(cluster);
+
+  /* ---------- build records from existing qgis2web geojson ---------- */
+  function num(v) {
+    var n = parseInt(String(v == null ? '' : v).replace(/[^0-9]/g, ''), 10);
+    return isNaN(n) ? null : n;
+  }
+  function photoUrl(p) {
+    if (!p) return '';
+    return 'images/' + String(p).replace(/[\\/:]/g, '_').trim();
+  }
+
+  var records = json_3323M1uncertain_1.features.map(function (f, i) {
+    var p = f.properties || {};
+    var c = (f.geometry && f.geometry.coordinates) || [null, null];
+    return {
+      id: p.file_name || ('rec-' + i),
+      lat: c[1],
+      lng: c[0],
+      place_name: p.place_name || '',
+      photo_no: p.photo_no || '',
+      uncertainty: num(p.location_uncertainty_m),
+      file_name: p.file_name || '',
+      capture_date: p.Sorting_date || '',
+      notes: p.notes || '',
+      location_note: p.location_uncertainty_note || '',
+      photographer: p.photographer || '',
+      handler: p.handler || '',
+      photo: photoUrl(p.photo_path),
+      marker: null
+    };
+  }).filter(function (r) { return r.lat != null && r.lng != null; });
+
+  records.forEach(function (r) {
+    var m = L.circleMarker([r.lat, r.lng], BASE_STYLE);
+    m.on('click', function (ev) {
+      if (ev && ev.originalEvent) L.DomEvent.stopPropagation(ev.originalEvent);
+      selectRecord(r);
+    });
+    m.on('mouseover', function () {
+      if (selected !== r) m.setStyle(HOVER_STYLE);
+      m.bringToFront();
+    });
+    m.on('mouseout', function () {
+      if (selected !== r) m.setStyle(BASE_STYLE);
+    });
+    r.marker = m;
+  });
+
+  /* ---------- filter model ---------- */
+  var GROUPS = [
+    { key: 'place_name', label: 'Place name', get: function (r) { return r.place_name || '—'; } },
+    { key: 'photo_no', label: 'Photo no.', get: function (r) { return r.photo_no || '—'; } },
+    { key: 'uncertainty', label: 'Location uncertainty (m)', get: function (r) { return r.uncertainty == null ? '—' : r.uncertainty + ' m'; } }
+  ];
+
+  var state = {};   // key -> { values:[...], selected:Set }
+  GROUPS.forEach(function (g) {
+    var vals = [];
+    var seen = {};
+    records.forEach(function (r) {
+      var v = g.get(r);
+      if (!seen[v]) { seen[v] = true; vals.push(v); }
+    });
+    if (g.key === 'photo_no') vals.sort();
+    if (g.key === 'uncertainty') vals.sort(function (a, b) { return parseInt(a, 10) - parseInt(b, 10); });
+    state[g.key] = { values: vals, selected: new Set(vals) };
+  });
+
+  var filterGroupsEl = document.getElementById('filterGroups');
+
+  function renderFilters() {
+    filterGroupsEl.innerHTML = '';
+    GROUPS.forEach(function (g) {
+      var st = state[g.key];
+      var wrap = document.createElement('div');
+      wrap.className = 'group';
+
+      var head = document.createElement('div');
+      head.className = 'group-head';
+      var title = document.createElement('div');
+      title.className = 'group-title';
+      title.textContent = g.label;
+      var acts = document.createElement('div');
+      acts.className = 'group-actions';
+      var bAll = document.createElement('button');
+      bAll.type = 'button'; bAll.className = 'mini'; bAll.textContent = 'all';
+      var bNone = document.createElement('button');
+      bNone.type = 'button'; bNone.className = 'mini'; bNone.textContent = 'none';
+      bAll.addEventListener('click', function () { st.selected = new Set(st.values); renderFilters(); applyFilters(); });
+      bNone.addEventListener('click', function () { st.selected = new Set(); renderFilters(); applyFilters(); });
+      acts.appendChild(bAll); acts.appendChild(bNone);
+      head.appendChild(title); head.appendChild(acts);
+      wrap.appendChild(head);
+
+      st.values.forEach(function (v) {
+        var count = records.filter(function (r) { return g.get(r) === v; }).length;
+        var lab = document.createElement('label');
+        lab.className = 'opt';
+        var cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = st.selected.has(v);
+        cb.addEventListener('change', function () {
+          if (cb.checked) st.selected.add(v); else st.selected.delete(v);
+          applyFilters();
+        });
+        var span = document.createElement('span');
+        span.className = 'lbl';
+        span.textContent = v;
+        var n = document.createElement('span');
+        n.className = 'n';
+        n.textContent = count;
+        lab.appendChild(cb); lab.appendChild(span); lab.appendChild(n);
+        wrap.appendChild(lab);
+      });
+
+      filterGroupsEl.appendChild(wrap);
+    });
+  }
+
+  function pass(r) {
+    for (var i = 0; i < GROUPS.length; i++) {
+      var g = GROUPS[i];
+      if (!state[g.key].selected.has(g.get(r))) return false;
+    }
+    return true;
+  }
+
+  function applyFilters() {
+    var visible = records.filter(pass);
+    cluster.clearLayers();
+    visible.forEach(function (r) { cluster.addLayer(r.marker); });
+    document.getElementById('shownCount').textContent = visible.length;
+    document.getElementById('chipCount').textContent = visible.length;
+    if (selected) {
+      var stillVisible = visible.indexOf(selected) !== -1;
+      if (!stillVisible) {
+        clearHighlight();
+        selected = null;
+        clearDetail();
+      }
+    }
+  }
+
+  /* ---------- selection + highlight ---------- */
+  var selected = null;
+  var halo = null;
+  var selLayer = null;   // 頂層高亮標記：不受 cluster 收合影響
+  var lastSelectAt = 0;
+
+  function clearHighlight() {
+    if (halo) { map.removeLayer(halo); halo = null; }
+    if (selLayer) { map.removeLayer(selLayer); selLayer = null; }
+  }
+
+  function highlight(r) {
+    clearHighlight();
+    // selPane（z 650）高於 marker/cluster 圖示，收合進 cluster 時高亮仍可見
+    halo = L.circleMarker([r.lat, r.lng], {
+      radius: 24, stroke: true, color: 'rgba(255,107,0,.9)', weight: 2,
+      fill: false, interactive: false, className: 'halo', pane: 'selPane'
+    }).addTo(map);
+    selLayer = L.circleMarker([r.lat, r.lng], {
+      radius: 12, color: '#ffffff', weight: 3, fillColor: '#ff6b00',
+      fillOpacity: 1, interactive: false, pane: 'selPane'
+    }).addTo(map);
+    renderDetail(r);
+  }
+
+  function selectRecord(r) {
+    lastSelectAt = Date.now();
+    if (selected && selected !== r) selected.marker.setStyle(BASE_STYLE);
+    selected = r;
+    highlight(r);
+    if (!map.hasLayer(r.marker)) {
+      // marker 還在 cluster 裡：請 cluster 自動縮放/展開到看得到為止
+      cluster.zoomToShowLayer(r.marker, function () { highlight(r); });
+    }
+    if (window.innerWidth <= 1180) closeDrawer();
+  }
+
+  /* ---------- detail panel ---------- */
+  var FIELDS = [
+    { k: 'file_name', label: 'File name', mono: true },
+    { k: 'place_name', label: 'Place name' },
+    { k: 'capture_date', label: 'Capture date' },
+    { k: 'photo_no', label: 'Photo no.', mono: true },
+    { k: 'uncertainty', label: 'Precision', fmt: function (r) { return r.uncertainty == null ? '—' : '± ' + r.uncertainty + ' m'; } },
+    { k: 'notes', label: 'Notes' },
+    { k: 'location_note', label: 'Location note' },
+    { k: 'photographer', label: 'Photographer' },
+    { k: 'handler', label: 'Scan by' }
+  ];
+
+  function clearDetail() {
+    document.getElementById('emptyState').hidden = false;
+    document.getElementById('detailBody').hidden = true;
+    document.getElementById('detailId').textContent = '';
+  }
+
+  function renderDetail(r) {
+    document.getElementById('emptyState').hidden = true;
+    document.getElementById('detailBody').hidden = false;
+    document.getElementById('detailId').textContent = r.photo_no || r.file_name;
+
+    var img = document.getElementById('photoImg');
+    img.src = r.photo;
+    img.alt = r.file_name || r.place_name;
+    document.getElementById('photoCap').textContent = r.photo;
+
+    var dl = document.getElementById('fieldList');
+    dl.innerHTML = '';
+    FIELDS.forEach(function (f) {
+      var v = f.fmt ? f.fmt(r) : r[f.k];
+      if (v == null || v === '' || v === '—') return;
+      var row = document.createElement('div');
+      row.className = 'row';
+      var dt = document.createElement('dt');
+      dt.textContent = f.label;
+      var dd = document.createElement('dd');
+      if (f.mono) dd.className = 'mono';
+      dd.textContent = v;
+      row.appendChild(dt); row.appendChild(dd);
+      dl.appendChild(row);
+    });
+  }
+
+  document.getElementById('photoImg').addEventListener('error', function () {
+    this.alt = '照片無法載入';
+    document.getElementById('photoCap').textContent = '（此照片檔案無法載入）';
+  });
+  document.getElementById('photoImg').addEventListener('click', function () {
+    if (this.src) window.open(this.src, '_blank');
+  });
+
+  /* ---------- bulk buttons ---------- */
+  document.getElementById('btnAll').addEventListener('click', function () {
+    GROUPS.forEach(function (g) { state[g.key].selected = new Set(state[g.key].values); });
+    renderFilters(); applyFilters();
+  });
+  document.getElementById('btnClear').addEventListener('click', function () {
+    GROUPS.forEach(function (g) { state[g.key].selected = new Set(); });
+    renderFilters(); applyFilters();
+  });
+
+  /* ---------- drawer (tablet / mobile) ---------- */
+  var filtersEl = document.getElementById('filters');
+  var backdrop = document.getElementById('backdrop');
+  var openBtn = document.getElementById('openFilters');
+
+  function openDrawer() {
+    filtersEl.classList.add('open');
+    backdrop.classList.add('on');
+    openBtn.setAttribute('aria-expanded', 'true');
+  }
+  function closeDrawer() {
+    filtersEl.classList.remove('open');
+    backdrop.classList.remove('on');
+    openBtn.setAttribute('aria-expanded', 'false');
+  }
+  openBtn.addEventListener('click', function () {
+    filtersEl.classList.contains('open') ? closeDrawer() : openDrawer();
+  });
+  backdrop.addEventListener('click', closeDrawer);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeDrawer(); });
+
+  /* ---------- boot ---------- */
+  document.getElementById('totalCount').textContent = records.length;
+  document.getElementById('chipTotal').textContent = records.length;
+  renderFilters();
+  applyFilters();
+
+  setTimeout(function () { map.invalidateSize(); }, 200);
+
+  // debug hook (方便在 console 檢視狀態，不影響功能)
+  window.M1 = { map: map, records: records, select: selectRecord, state: state };
+
+  cluster.on('clusterclick', function () { lastSelectAt = Date.now(); });  // 點 cluster 縮放時不取消選取
+  map.on('click', function () {
+    if (Date.now() - lastSelectAt < 350) return;   // 剛點過 marker，忽略同一次點擊的冒泡
+    if (selected) {
+      clearHighlight();
+      selected = null;
+      clearDetail();
+    }
+  });
+})();
+</script>
+</body>
+</html>
